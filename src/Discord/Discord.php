@@ -11,7 +11,6 @@
 
 namespace Discord;
 
-use Cache\Adapter\PHPArray\ArrayCachePool;
 use Discord\Factory\Factory;
 use Discord\Http\Guzzle;
 use Discord\Http\Http;
@@ -20,18 +19,15 @@ use Discord\Parts\Channel\Channel;
 use Discord\Parts\User\Activity;
 use Discord\Parts\User\Client;
 use Discord\Parts\User\Member;
-use Discord\Repository\GuildRepository;
-use Discord\Repository\PrivateChannelRepository;
+use Discord\Parts\User\User;
 use Discord\Voice\VoiceClient;
 use Discord\WebSockets\Event;
 use Discord\WebSockets\Events\GuildCreate;
 use Discord\WebSockets\Handlers;
 use Discord\WebSockets\Op;
-use Discord\Wrapper\CacheWrapper;
 use Evenement\EventEmitterTrait;
 use Monolog\Handler\StreamHandler;
 use Monolog\Logger as Monolog;
-use Psr\Cache\CacheItemPoolInterface;
 use Ratchet\Client\Connector;
 use Ratchet\Client\WebSocket;
 use Ratchet\RFC6455\Messaging\Message;
@@ -276,20 +272,6 @@ class Discord
     protected $factory;
 
     /**
-     * The cache wrapper.
-     *
-     * @var CacheWrapper Cache.
-     */
-    protected $cache;
-
-    /**
-     * The cache pool that is in use.
-     *
-     * @var CacheItemPoolInterface Cache pool.
-     */
-    protected $cachePool;
-
-    /**
      * The Client class.
      *
      * @var Client Discord client.
@@ -310,7 +292,6 @@ class Discord
         $this->logger = new Logger($options['logger'], $options['logging']);
         $this->wsFactory = new Connector($this->loop);
         $this->handlers = new Handlers();
-        $this->cachePool = $options['cachePool'];
 
         $this->on('ready', function () {
             $this->emittedReady = true;
@@ -322,14 +303,12 @@ class Discord
 
         $this->options = $options;
 
-        $this->cache = new CacheWrapper($this->cachePool); // todo cache pool
         $this->http = new Http(
-            $this->cache,
             ($options['bot'] ? 'Bot ' : '').$this->token,
             self::VERSION,
-            new Guzzle($this->cache, $this->loop)
+            new Guzzle($this->loop)
         );
-        $this->factory = new Factory($this, $this->http, $this->cache);
+        $this->factory = new Factory($this, $this->http);
 
         $this->setGateway()->then(function ($g) {
             $this->connectWs();
@@ -394,36 +373,21 @@ class Discord
         $this->logger->debug('client created and session id stored', ['session_id' => $content->session_id, 'user' => $this->client->user->getPublicAttributes()]);
 
         // Private Channels
-        $private_channels = new PrivateChannelRepository(
-            $this->http,
-            $this->cache,
-            $this->factory
-        );
-
         if ($this->options['pmChannels']) {
             foreach ($content->private_channels as $channel) {
                 $channelPart = $this->factory->create(Channel::class, $channel, true);
-                $this->cache->set("pm_channels.{$channelPart->recipient->id}", $channelPart);
-                $private_channels->push($channelPart);
+                $this->private_channels->push($channelPart);
             }
 
-            $this->logger->info('stored private channels', ['count' => $private_channels->count()]);
+            $this->logger->info('stored private channels', ['count' => $this->private_channels->count()]);
         } else {
             $this->logger->info('did not parse private channels');
         }
 
-        $this->private_channels = $private_channels;
-
         // Guilds
-        $this->guilds = new GuildRepository(
-            $this->http,
-            $this->cache,
-            $this->factory
-        );
         $event = new GuildCreate(
             $this->http,
             $this->factory,
-            $this->cache,
             $this
         );
 
@@ -455,7 +419,7 @@ class Discord
         });
 
         $function = function ($guild) use (&$function, &$unavailable) {
-            $this->logger->debug('guild available', ['guild' => $guild->id]);
+            $this->logger->debug('guild available', ['guild' => $guild->id, 'unavailable' => count($unavailable)]);
             if (array_key_exists($guild->id, $unavailable)) {
                 unset($unavailable[$guild->id]);
             }
@@ -479,15 +443,15 @@ class Discord
      */
     protected function handleGuildMembersChunk($data)
     {
-        $guild = $this->guilds->get('id', $data->d->guild_id);
+        $guild = $this->guilds->offsetGet($data->d->guild_id);
         $members = $data->d->members;
 
-        $this->logger->debug('received guild member chunk', ['guild_id' => $guild->id, 'guild_name' => $guild->name, 'member_count' => count($members)]);
+        $this->logger->debug('received guild member chunk', ['guild_id' => $guild->id, 'guild_name' => $guild->name, 'chunk_count' => count($members), 'member_collection' => $guild->members->count(), 'member_count' => $guild->member_count]);
 
         $count = 0;
 
         foreach ($members as $member) {
-            if (array_key_exists($member->user->id, $guild->members)) {
+            if ($guild->members->offsetExists($member->user->id)) {
                 continue;
             }
 
@@ -497,8 +461,11 @@ class Discord
             $member['game'] = null;
 
             $memberPart = $this->factory->create(Member::class, $member, true);
-            $guild->members->push($memberPart);
-            $this->users->push($memberPart->user);
+            $userPart = $this->factory->create(User::class, $member['user'], true);
+
+            $guild->members->offsetSet($memberPart->id, $memberPart);
+            $this->users->offsetSet($userPart->id, $userPart);
+
             ++$count;
         }
 
@@ -510,6 +477,7 @@ class Discord
             }
 
             $this->logger->debug('all users have been loaded', ['guild' => $guild->id, 'member_collection' => $guild->members->count(), 'member_count' => $guild->member_count]);
+            $this->guilds->offsetSet($guild->id, $guild);
         }
 
         if (count($this->largeSent) < 1) {
@@ -669,7 +637,6 @@ class Discord
             $handler = new $hData['class'](
                 $this->http,
                 $this->factory,
-                $this->cache,
                 $this
             );
 
@@ -1207,7 +1174,6 @@ class Discord
                 'logger',
                 'loggerLevel',
                 'logging',
-                'cachePool',
                 'loadAllMembers',
                 'disabledEvents',
                 'pmChannels',
@@ -1220,7 +1186,6 @@ class Discord
                 'logger' => null,
                 'loggerLevel' => Monolog::INFO,
                 'logging' => true,
-                'cachePool' => new ArrayCachePool(),
                 'loadAllMembers' => false,
                 'disabledEvents' => [],
                 'pmChannels' => false,
@@ -1230,7 +1195,6 @@ class Discord
             ->setAllowedTypes('bot', 'bool')
             ->setAllowedTypes('loop', LoopInterface::class)
             ->setAllowedTypes('logging', 'bool')
-            ->setAllowedTypes('cachePool', CacheItemPoolInterface::class)
             ->setAllowedTypes('loadAllMembers', 'bool')
             ->setAllowedTypes('disabledEvents', 'array')
             ->setAllowedTypes('pmChannels', 'bool')
@@ -1294,37 +1258,6 @@ class Discord
     public function factory()
     {
         return call_user_func_array([$this->factory, 'create'], func_get_args());
-    }
-
-    /**
-     * Attempts to get a repository from the cache.
-     *
-     * @param string $class The repository to look for.
-     * @param string $id    The snowflake to look for.
-     * @param string $key   The key to look for.
-     * @param array  $vars  An array of args to pass to the repository.
-     *
-     * @return AbstractRepository
-     */
-    public function getRepository($class, $id, $key, $vars = [])
-    {
-        $classKey = str_replace('\\', '', $class);
-        $cacheKey = "repositories.{$classKey}.{$id}.{$key}";
-
-        if ($object = $this->cache->get($cacheKey)) {
-            return $object;
-        }
-
-        $repository = new $class(
-            $this->http,
-            $this->cache,
-            $this->factory,
-            $vars
-        );
-
-        $this->cache->set($cacheKey, $repository);
-
-        return $repository;
     }
 
     /**
@@ -1405,7 +1338,7 @@ class Discord
         $replace = array_intersect_key($secrets, $this->options);
         $config = $replace + $this->options;
 
-        unset($config['loop'], $config['cachePool'], $config['logger']);
+        unset($config['loop'], $config['logger']);
 
         return $config;
     }

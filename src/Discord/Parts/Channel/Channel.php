@@ -65,6 +65,9 @@ class Channel extends Part
     const TYPE_DM = 1;
     const TYPE_VOICE = 2;
     const TYPE_GROUP = 3;
+    const TYPE_CATEGORY = 4;
+    const TYPE_NEWS = 5;
+    const TYPE_GAME_STORE = 6;
 
     /**
      * {@inheritdoc}
@@ -271,11 +274,11 @@ class Channel extends Part
     /**
      * Creates an invite for the channel.
      *
-     * @param array $options             An array of options. All fields are optional.
-     * @param int  $options['max_age']   The time that the invite will be valid in seconds.
-     * @param int  $options['max_uses']  The amount of times the invite can be used.
-     * @param bool $options['temporary']  Whether the invite is for temporary membership.
-     * @param bool $options['unique']    Whether the invite code should be unique (useful for creating many unique one time use invites).
+     * @param array $options              An array of options. All fields are optional.
+     * @param int   $options['max_age']   The time that the invite will be valid in seconds.
+     * @param int   $options['max_uses']  The amount of times the invite can be used.
+     * @param bool  $options['temporary'] Whether the invite is for temporary membership.
+     * @param bool  $options['unique']    Whether the invite code should be unique (useful for creating many unique one time use invites).
      *
      * @return \React\Promise\Promise
      */

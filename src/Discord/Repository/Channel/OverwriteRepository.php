@@ -17,8 +17,8 @@ use Discord\Repository\AbstractRepository;
 /**
  * Contains permission overwrites for channels.
  *
- * @see Discord\Parts\Channel\Overwrite
- * @see Discord\Parts\Channel\Channel
+ * @see \Discord\Parts\Channel\Overwrite
+ * @see \Discord\Parts\Channel\Channel
  */
 class OverwriteRepository extends AbstractRepository
 {
@@ -32,5 +32,5 @@ class OverwriteRepository extends AbstractRepository
     /**
      * {@inheritdoc}
      */
-    protected $part = Overwrite::class;
+    protected $class = Overwrite::class;
 }

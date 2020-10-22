@@ -16,6 +16,7 @@ use Discord\Factory\Factory;
 use Discord\Http\Http;
 use Evenement\EventEmitterTrait;
 use React\Promise\Deferred;
+use React\Promise\PromiseInterface;
 
 /**
  * Contains constants for WebSocket events as well as handlers
@@ -43,12 +44,19 @@ abstract class Event
 
     const GUILD_BAN_ADD = 'GUILD_BAN_ADD';
     const GUILD_BAN_REMOVE = 'GUILD_BAN_REMOVE';
+
     const GUILD_MEMBER_ADD = 'GUILD_MEMBER_ADD';
     const GUILD_MEMBER_REMOVE = 'GUILD_MEMBER_REMOVE';
     const GUILD_MEMBER_UPDATE = 'GUILD_MEMBER_UPDATE';
+
     const GUILD_ROLE_CREATE = 'GUILD_ROLE_CREATE';
     const GUILD_ROLE_UPDATE = 'GUILD_ROLE_UPDATE';
     const GUILD_ROLE_DELETE = 'GUILD_ROLE_DELETE';
+
+    const GUILD_INTEGRATIONS_UPDATE = 'GUILD_INTEGRATIONS_UPDATE';
+
+    const INVITE_CREATE = 'INVITE_CREATE';
+    const INVITE_DELETE = 'INVITE_DELETE';
 
     // Channel
     const CHANNEL_CREATE = 'CHANNEL_CREATE';
@@ -83,7 +91,7 @@ abstract class Event
     /**
      * The Discord client instance.
      *
-     * @var \Discord\Discord Client.
+     * @var Discord Client.
      */
     protected $discord;
 
@@ -107,10 +115,12 @@ abstract class Event
      *
      * @param Deferred     $deferred The promise to use
      * @param array|object $data     The data that was sent with the WebSocket
+     *
+     * @return void|PromiseInterface
      */
-    abstract public function handle(Deferred $deferred, $data);
+    abstract public function handle(Deferred &$deferred, $data);
 
-    public function __debugInfo()
+    public function __debugInfo(): array
     {
         return [];
     }

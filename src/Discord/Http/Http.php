@@ -16,9 +16,11 @@ use Discord\Exceptions\Rest\ContentTooLongException;
 use Discord\Exceptions\Rest\NoPermissionsException;
 use Discord\Exceptions\Rest\NotFoundException;
 use Discord\Parts\Channel\Channel;
+use Exception;
 use GuzzleHttp\Psr7\Response;
 use Illuminate\Support\Str;
 use React\Promise\Deferred;
+use React\Promise\PromiseInterface;
 
 /**
  * Provides an easy wrapper for HTTP requests, allows for interchangable connectors.
@@ -63,7 +65,7 @@ class Http
      * @param string     $version
      * @param HttpDriver $driver  The request driver.
      */
-    public function __construct($token, $version, $driver)
+    public function __construct(string $token, string $version, HttpDriver $driver)
     {
         $this->token = $token;
         $this->version = $version;
@@ -75,7 +77,7 @@ class Http
      *
      * @param HttpDriver $driver
      */
-    public function setDriver(HttpDriver $driver)
+    public function setDriver(HttpDriver $driver): void
     {
         $this->driver = $driver;
     }
@@ -86,20 +88,19 @@ class Http
      * @param string $name   The endpoint that will be queried.
      * @param array  $params Parameters that will be encoded into JSON and sent with the request.
      *
-     * @return \React\Promise\Promise
+     * @return PromiseInterface
      *
      * @see \Discord\Helpers\Guzzle::runRequest() This function will be forwareded onto runRequest.
      */
-    public function __call($name, $params)
+    public function __call(string $name, array $params): PromiseInterface
     {
         $url = $params[0];
         $content = (isset($params[1])) ? $params[1] : null;
         $headers = (isset($params[2])) ? $params[2] : [];
         $cache = (isset($params[3])) ? $params[3] : null;
-        $blocking = (isset($params[4])) ? $params[4] : false;
         $options = (isset($params[5])) ? $params[5] : [];
 
-        return $this->runRequest(strtolower($name), $url, $content, $headers, $cache, $blocking, $options);
+        return $this->runRequest(strtolower($name), $url, $content, $headers, $cache, $options);
     }
 
     /**
@@ -111,7 +112,6 @@ class Http
      * @param array         $extraHeaders Extra headers to send with the request.
      * @param bool|int|null $cache        If an integer is passed, used as cache TTL, if null is passed, default TTL is
      *                                    used, if false, cache is disabled
-     * @param bool          $blocking     Whether the request should be sent as blocking.
      * @param array         $options      Array of options to pass to Guzzle.
      *
      * @throws ContentTooLongException
@@ -119,9 +119,9 @@ class Http
      * @throws NoPermissionsException
      * @throws NotFoundException
      *
-     * @return \React\Promise\Promise
+     * @return PromiseInterface
      */
-    private function runRequest($method, $url, $content, $extraHeaders, $cache, $blocking, $options)
+    private function runRequest(string $method, string $url, ?array $content, ?array $extraHeaders, $cache, ?array $options): PromiseInterface
     {
         $deferred = new Deferred();
         $disable_json = false;
@@ -142,12 +142,6 @@ class Http
             $headers['Content-Type'] = 'application/json';
             $content = json_encode($content);
             $headers['Content-Length'] = strlen($content);
-        }
-
-        if ($blocking) {
-            $response = $this->driver->blocking($method, $url, $headers, $content);
-
-            return json_decode($response->getBody());
         }
 
         if (array_key_exists('disable_json', $options)) {
@@ -203,14 +197,18 @@ class Http
      * @param string  $content  Extra text content to go with the file.
      * @param bool    $tts      Whether the message should be TTS.
      *
-     * @return \React\Promise\Promise
+     * @return PromiseInterface
      */
-    public function sendFile(Channel $channel, $filepath, $filename, $content, $tts)
+    public function sendFile(Channel $channel, string $filepath, ?string $filename, ?string $content, ?bool $tts): PromiseInterface
     {
+        $deferred = new Deferred();
+
+        $boundary = '----DiscordPHPSendFileBoundary';
+        $body = '';
         $multipart = [
             [
                 'name' => 'file',
-                'contents' => fopen($filepath, 'r'),
+                'contents' => file_get_contents($filepath),
                 'filename' => $filename,
             ],
             [
@@ -223,15 +221,84 @@ class Http
             ],
         ];
 
-        return $this->runRequest(
+        $body = $this->arrayToMultipart($multipart, $boundary);
+        $headers = [
+            'Content-Type' => 'multipart/form-data; boundary='.substr($boundary, 2),
+            'Content-Length' => strlen($body),
+            'authorization' => $this->token,
+            'User-Agent' => $this->getUserAgent(),
+        ];
+
+        $this->driver->runRequest(
             'POST',
             "channels/{$channel->id}/messages",
-            null,
-            [],
-            false,
-            false,
-            ['multipart' => $multipart]
+            $headers,
+            $body
+        )->then(
+            function ($response) use ($deferred) {
+                $json = json_decode($response->getBody());
+                $deferred->resolve($json);
+            },
+            function ($e) use ($deferred, $channel) {
+                if (! ($e instanceof \Exception)) {
+                    if (is_callable([$e, 'getStatusCode'])) {
+                        $e = $this->handleError(
+                            $e->getStatusCode(),
+                            $e->getReasonPhrase(),
+                            $e->getBody(),
+                            "channels/{$channel->id}/messages"
+                        );
+                    } else {
+                        $e = $this->handleError(
+                            0,
+                            'unknown',
+                            'unknown',
+                            "channels/{$channel->id}/messages"
+                        );
+                    }
+                }
+
+                $deferred->reject($e);
+            }
         );
+
+        return $deferred->promise();
+    }
+
+    /**
+     * Converts an array of key => value to a multipart body.
+     *
+     * @param array  $multipart
+     * @param string $boundary
+     *
+     * @return string
+     */
+    private function arrayToMultipart(array $multipart, string $boundary): string
+    {
+        $body = '';
+
+        foreach ($multipart as $part) {
+            $body .= $boundary."\n";
+            $body .= 'Content-Disposition: form-data; name="'.$part['name'].'"';
+
+            if (isset($part['filename'])) {
+                $body .= '; filename="'.$part['filename'].'"';
+            }
+
+            $body .= "\n";
+
+            if (isset($part['headers'])) {
+                foreach ($part['headers'] as $header => $val) {
+                    $body .= $header.': '.$val."\n";
+                }
+            }
+
+            $body .= "\n".$part['contents']."\n";
+        }
+
+        $body .= $boundary."--\n";
+
+        return $body;
     }
 
     /**
@@ -249,7 +316,7 @@ class Http
      * @return \Discord\Exceptions\Rest\NoPermissionsException   Returned when you do not have permissions to do
      *                                                           something.
      */
-    public function handleError($errorCode, $message, $content, $url)
+    public function handleError(int $errorCode, $message, string $content, string $url): Exception
     {
         if (! is_string($message)) {
             $message = $message->getReasonPhrase();
@@ -296,7 +363,7 @@ class Http
      *
      * @return string
      */
-    public function getUserAgent()
+    public function getUserAgent(): string
     {
         return 'DiscordBot (https://github.com/teamreflex/DiscordPHP, '.$this->version.')';
     }

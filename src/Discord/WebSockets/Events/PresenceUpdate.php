@@ -20,19 +20,19 @@ class PresenceUpdate extends Event
     /**
      * {@inheritdoc}
      */
-    public function handle(Deferred $deferred, $data)
+    public function handle(Deferred &$deferred, $data): void
     {
         /**
          * @var PresenceUpdatePart
          */
-        $presence = $this->factory->create(PresenceUpdatePart::class, $data, true);
+        $presence = $this->factory->create(PresenceUpdatePart::class, (array) $data, true);
 
         if ($guild = $presence->guild) {
             if ($member = $presence->member) {
                 $oldPresence = $member->updateFromPresence($presence);
 
-                $guild->members->push($member);
-                $this->discord->guilds->push($guild);
+                $guild->members->offsetSet($member->id, $member);
+                $this->discord->guilds->offsetSet($guild->id, $guild);
 
                 $deferred->resolve([$presence, $oldPresence]);
             }

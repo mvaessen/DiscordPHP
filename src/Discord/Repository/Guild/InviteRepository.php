@@ -17,8 +17,8 @@ use Discord\Repository\AbstractRepository;
 /**
  * Contains invites to guilds.
  *
- * @see Discord\Parts\Guild\Invite
- * @see Discord\Parts\Guild\Guild
+ * @see \Discord\Parts\Guild\Invite
+ * @see \Discord\Parts\Guild\Guild
  */
 class InviteRepository extends AbstractRepository
 {
@@ -35,5 +35,5 @@ class InviteRepository extends AbstractRepository
     /**
      * {@inheritdoc}
      */
-    protected $part = Invite::class;
+    protected $class = Invite::class;
 }

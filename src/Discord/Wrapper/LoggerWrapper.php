@@ -11,17 +11,27 @@
 
 namespace Discord\Wrapper;
 
-use Monolog\Logger as Monolog;
+use Psr\Log\LoggerInterface;
 
 /**
  * Provides an easy to use wrapper for the logger.
+ *
+ * @method LoggerInterface emergency(string $message, array $context = [])
+ * @method LoggerInterface alert(string $message, array $context = [])
+ * @method LoggerInterface critical(string $message, array $context = [])
+ * @method LoggerInterface error(string $message, array $context = [])
+ * @method LoggerInterface warning(string $message, array $context = [])
+ * @method LoggerInterface notice(string $message, array $context = [])
+ * @method LoggerInterface info(string $message, array $context = [])
+ * @method LoggerInterface debug(string $message, array $context = [])
+ * @method LoggerInterface log(string $level, string $message, array $context = [])
  */
 class LoggerWrapper
 {
     /**
-     * The monolog logger.
+     * The logger.
      *
-     * @var Monolog Logger.
+     * @var LoggerInterface Logger.
      */
     protected $logger;
 
@@ -35,10 +45,10 @@ class LoggerWrapper
     /**
      * Constructs the logger.
      *
-     * @param Monolog $logger  The Monolog logger.
-     * @param bool    $enabled Whether logging is enabled.
+     * @param LoggerInterface $logger  The Monolog logger.
+     * @param bool            $enabled Whether logging is enabled.
      */
-    public function __construct(Monolog $logger, $enabled = true)
+    public function __construct(LoggerInterface $logger, bool $enabled = true)
     {
         $this->logger = $logger;
         $this->enabled = $enabled;
@@ -52,7 +62,7 @@ class LoggerWrapper
      *
      * @return mixed
      */
-    public function __call($function, $params)
+    public function __call(string $function, array $params)
     {
         if (! $this->enabled) {
             return false;

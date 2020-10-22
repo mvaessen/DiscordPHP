@@ -17,8 +17,8 @@ use Discord\Repository\AbstractRepository;
 /**
  * Contains messages sent to channels.
  *
- * @see Discord\Parts\Channel\Message
- * @see Discord\Parts\Channel\Channel
+ * @see \Discord\Parts\Channel\Message
+ * @see \Discord\Parts\Channel\Channel
  */
 class MessageRepository extends AbstractRepository
 {
@@ -34,5 +34,5 @@ class MessageRepository extends AbstractRepository
     /**
      * {@inheritdoc}
      */
-    protected $part = Message::class;
+    protected $class = Message::class;
 }

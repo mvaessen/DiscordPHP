@@ -12,10 +12,11 @@
 namespace Discord\Parts\User;
 
 use Discord\Parts\Channel\Channel;
-use Discord\Parts\Channel\Message;
 use Discord\Parts\Embed\Embed;
 use Discord\Parts\Part;
 use React\Promise\Deferred;
+use React\Promise\PromiseInterface;
+use function React\Partial\bind as Bind;
 
 /**
  * A user is a general user that is not attached to a guild.
@@ -26,20 +27,47 @@ use React\Promise\Deferred;
  * @property string $avatar_hash   The avatar hash of the user.
  * @property string $discriminator The discriminator of the user.
  * @property bool   $bot           Whether the user is a bot.
+ * @property bool $system Whether the user is a Discord system user.
+ * @property bool $mfa_enabled Whether MFA is enabled.
+ * @property string $locale User locale.
+ * @property bool $verified Whether the user is verified.
+ * @property string $email User email.
+ * @property int $flags User flags.
+ * @property int $premium_type Type of nitro subscription.
+ * @property int $public_flags Public flags on the user.
  */
 class User extends Part
 {
+    const FLAG_DISCORD_EMPLOYEE = (1 << 0);
+    const FLAG_DISCORD_PARTNER = (1 << 1);
+    const FLAG_HYPESQUAD_EVENTS = (1 << 2);
+    const FLAG_BUG_HUNTER_LEVEL_1 = (1 << 3);
+    const FLAG_HOUSE_BRAVERY = (1 << 6);
+    const FLAG_HOUSE_BRILLIANCE = (1 << 7);
+    const FLAG_HOUSE_BALANCE = (1 << 8);
+    const FLAG_EARLY_SUPPORTER = (1 << 9);
+    const FLAG_TEAM_USER = (1 << 10);
+    const FLAG_SYSTEM = (1 << 12);
+    const FLAG_BUG_HUNTER_LEVEL_2 = (1 << 14);
+    const FLAG_VERIFIED_BOT = (1 << 16);
+    const FLAG_VERIFIED_BOT_DEVELOPER = (1 << 17);
+
+    const PREMIUM_NONE = 0;
+    const PREMIUM_NITRO_CLASSIC = 1;
+    const PREMIUM_NITRO = 2;
+
     /**
      * {@inheritdoc}
      */
-    protected $fillable = ['id', 'username', 'avatar', 'discriminator', 'bot'];
+    protected $fillable = ['id', 'username', 'avatar', 'discriminator', 'bot', 'system', 'mfa_enabled', 'locale', 'verified', 'email', 'flags', 'premium_type', 'public_flags'];
 
     /**
      * Gets the private channel for the user.
      *
-     * @return \React\Promise\Promise
+     * @return PromiseInterface
+     * @throws \Exception
      */
-    public function getPrivateChannel()
+    public function getPrivateChannel(): PromiseInterface
     {
         $deferred = new Deferred();
 
@@ -47,11 +75,11 @@ class User extends Part
             $deferred->resolve($channel);
         } else {
             $this->http->post('users/@me/channels', ['recipient_id' => $this->id])->then(function ($response) use ($deferred) {
-                $channel = $this->factory->create(Channel::class, $response, true);
+                $channel = $this->factory->create(Channel::class, (array) $response, true);
                 $this->discord->private_channels->push($channel);
 
                 $deferred->resolve($channel);
-            }, \React\Partial\bind_right($this->reject, $deferred));
+            }, Bind([$deferred, 'reject']));
         }
 
         return $deferred->promise();
@@ -60,22 +88,22 @@ class User extends Part
     /**
      * Sends a message to the user.
      *
-     * @param string $text  The text to send in the message.
-     * @param bool   $tts   Whether the message should be sent with text to speech enabled.
-     * @param Embed  $embed An embed to send.
+     * @param string     $message The text to send in the message.
+     * @param bool       $tts     Whether the message should be sent with text to speech enabled.
+     * @param Embed|null $embed   An embed to send.
      *
-     * @return \React\Promise\Promise
+     * @return PromiseInterface
+     * @throws \Exception
      */
-    public function sendMessage($message, $tts = false, $embed = null)
+    public function sendMessage(string $message, bool $tts = false, ?Embed $embed = null): PromiseInterface
     {
         $deferred = new Deferred();
 
         $this->getPrivateChannel()->then(function ($channel) use ($message, $tts, $embed, $deferred) {
-            $channel->sendMessage($message, $tts, $embed)->then(function ($response) use ($deferred) {
-                $message = $this->factory->create(Message::class, $response, true);
+            $channel->sendMessage($message, $tts, $embed)->then(function ($message) use ($deferred) {
                 $deferred->resolve($message);
-            }, \React\Partial\bind_right($this->reject, $deferred));
-        }, \React\Partial\bind_right($this->reject, $deferred));
+            }, Bind([$deferred, 'reject']));
+        }, Bind([$deferred, 'reject']));
 
         return $deferred->promise();
     }
@@ -83,16 +111,17 @@ class User extends Part
     /**
      * Broadcasts that you are typing to the channel. Lasts for 5 seconds.
      *
-     * @return \React\Promise\Promise
+     * @return PromiseInterface
+     * @throws \Exception
      */
-    public function broadcastTyping()
+    public function broadcastTyping(): PromiseInterface
     {
         $deferred = new Deferred();
 
         $this->getPrivateChannel()->then(function ($channel) use ($deferred) {
             $channel->broadcastTyping()->then(
-                \React\Partial\bind_right($this->resolve, $deferred),
-                \React\Partial\bind_right($this->reject, $deferred)
+                Bind([$deferred, 'resolve']),
+                Bind([$deferred, 'reject'])
             );
         });
 
@@ -107,10 +136,12 @@ class User extends Part
      *
      * @return string The URL to the clients avatar.
      */
-    public function getAvatarAttribute($format = 'jpg', $size = 1024)
+    public function getAvatarAttribute(string $format = 'jpg', int $size = 1024): string
     {
         if (empty($this->attributes['avatar'])) {
-            return;
+            $avatarDiscrim = (int) $this->discriminator % 5;
+
+            return "https://cdn.discordapp.com/embed/avatars/{$avatarDiscrim}.png?size={$size}";
         }
 
         if (false === array_search($format, ['png', 'jpg', 'webp'])) {
@@ -125,7 +156,7 @@ class User extends Part
      *
      * @return string The client avatar's hash.
      */
-    public function getAvatarHashAttribute()
+    protected function getAvatarHashAttribute(): string
     {
         return $this->attributes['avatar'];
     }

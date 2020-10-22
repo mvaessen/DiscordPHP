@@ -12,11 +12,13 @@
 namespace Discord\Repository;
 
 use Discord\Parts\Guild\Guild;
+use React\Promise\Deferred;
+use React\Promise\PromiseInterface;
 
 /**
  * Contains guilds that the user is in.
  *
- * @see Discord\Parts\Guild\Guild
+ * @see \Discord\Parts\Guild\Guild
  */
 class GuildRepository extends AbstractRepository
 {
@@ -35,5 +37,28 @@ class GuildRepository extends AbstractRepository
     /**
      * {@inheritdoc}
      */
-    protected $part = Guild::class;
+    protected $class = Guild::class;
+
+    /**
+     * Causes the client to leave a guild.
+     * 
+     * @param Guild|snowflake $guild
+     * 
+     * @return PromiseInterface
+     */
+    public function leave($guild): PromiseInterface
+    {
+        $deferred = new Deferred();
+
+        if ($guild instanceof Guild) {
+            $guild = $guild->id;
+        }
+
+        $this->http->delete("users/@me/guilds/{$guild}")->then(function () use ($guild, $deferred) {
+            $this->pull('id', $guild);
+            $deferred->resolve();
+        }, \React\Partial\bind([$deferred, 'reject']));
+
+        return $deferred->promise();
+    }
 }

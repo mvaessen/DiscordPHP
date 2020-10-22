@@ -14,20 +14,21 @@ namespace Discord\Parts\Guild;
 use Discord\Parts\Part;
 use Discord\Parts\Permissions\RolePermission;
 use React\Promise\Deferred;
+use React\Promise\PromiseInterface;
 
 /**
  * A role defines permissions for the guild. Members can be added to the role. The role belongs to a guild.
  *
- * @property string                                    $id          The unique identifier of the role.
- * @property string                                    $name        The name of the role.
- * @property int                                       $color       The color of the guild.
- * @property bool                                      $managed     Whether the role is managed by a Twitch subscriber feature.
- * @property bool                                      $hoist       Whether the role is hoisted on the sidebar.
- * @property int                                       $position    The position of the role on the sidebar.
- * @property \Discord\Parts\Permissions\RolePermission $permissions The permissions of the role.
- * @property bool                                      $mentionable Whether the role is mentionable.
- * @property \Discord\Parts\Guild\Guild                $guild       The guild that the role belongs to.
- * @property string                                    $guild_id    The unique identifier of the guild that the role belongs to.
+ * @property string         $id          The unique identifier of the role.
+ * @property string         $name        The name of the role.
+ * @property int            $color       The color of the guild.
+ * @property bool           $managed     Whether the role is managed by a Twitch subscriber feature.
+ * @property bool           $hoist       Whether the role is hoisted on the sidebar.
+ * @property int            $position    The position of the role on the sidebar.
+ * @property RolePermission $permissions The permissions of the role.
+ * @property bool           $mentionable Whether the role is mentionable.
+ * @property Guild          $guild       The guild that the role belongs to.
+ * @property string         $guild_id    The unique identifier of the guild that the role belongs to.
  */
 class Role extends Part
 {
@@ -37,9 +38,9 @@ class Role extends Part
     protected $fillable = ['id', 'name', 'color', 'managed', 'hoist', 'position', 'permissions', 'mentionable', 'guild_id'];
 
     /**
-     * Runs extra construction tasks.
+     * {@inheritdoc}
      */
-    public function afterConstruct()
+    protected function afterConstruct(): void
     {
         if (! isset($this->attributes['permissions'])) {
             $this->permissions = $this->factory->create(RolePermission::class);
@@ -51,7 +52,7 @@ class Role extends Part
      *
      * @return Guild The guild attribute.
      */
-    public function getGuildAttribute()
+    protected function getGuildAttribute(): Guild
     {
         return $this->discord->guilds->get('id', $this->guild_id);
     }
@@ -59,15 +60,13 @@ class Role extends Part
     /**
      * Sets the permissions attribute.
      *
-     * @param RolePermission|int $permission The permissions to set.
+     * @param  RolePermission|int $permission The permissions to set.
+     * @throws \Exception
      */
-    public function setPermissionsAttribute($permission)
+    protected function setPermissionsAttribute($permission): void
     {
         if (! ($permission instanceof RolePermission)) {
-            $permissionPart = $this->factory->create(RolePermission::class);
-            $permissionPart->decodeBitwise($permission);
-
-            $permission = $permissionPart;
+            $permission = $this->factory->create(RolePermission::class, ['bitwise' => $permission], true);
         }
 
         $this->attributes['permissions'] = $permission;
@@ -76,25 +75,25 @@ class Role extends Part
     /**
      * Sets the color for a role. RGB.
      *
-     * @param int $red   The red value in RGB.
-     * @param int $green The green value in RGB.
-     * @param int $blue  The blue value in RGB.
+     * @param int|null $red   The red value in RGB.
+     * @param int|null $green The green value in RGB.
+     * @param int|null $blue  The blue value in RGB.
      *
-     * @return \React\Promise\Promise
+     * @return PromiseInterface
      */
-    public function setColor($red = null, $green = null, $blue = null)
+    public function setColor(?int $red = null, ?int $green = null, ?int $blue = null): PromiseInterface
     {
         $deferred = new Deferred();
 
         if (is_null($red)) {
-            $this->setAttribute('color', 0);
+            $this->color = 0;
 
             $deferred->resolve();
 
             return $deferred->promise();
         }
 
-        $this->setAttribute('color', $red * 16 ** 4 + $green * 16 ** 2 + $blue);
+        $this->color = ($red * 16 ** 4 + $green * 16 ** 2 + $blue);
 
         $deferred->resolve();
 
@@ -104,7 +103,7 @@ class Role extends Part
     /**
      * {@inheritdoc}
      */
-    public function getCreatableAttributes()
+    public function getCreatableAttributes(): array
     {
         return [];
     }
@@ -112,7 +111,7 @@ class Role extends Part
     /**
      * {@inheritdoc}
      */
-    public function getUpdatableAttributes()
+    public function getUpdatableAttributes(): array
     {
         return [
             'name' => $this->name,

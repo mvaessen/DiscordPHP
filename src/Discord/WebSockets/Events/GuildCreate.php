@@ -26,7 +26,7 @@ class GuildCreate extends Event
     /**
      * {@inheritdoc}
      */
-    public function handle(Deferred $deferred, $data)
+    public function handle(Deferred &$deferred, $data)
     {
         if (isset($data->unavailable) && $data->unavailable) {
             $deferred->reject(['unavailable', $data->id]);
@@ -34,11 +34,11 @@ class GuildCreate extends Event
             return $deferred->promise();
         }
 
-        $guildPart = $this->factory->create(Guild::class, $data, true);
+        $guildPart = $this->factory->create(Guild::class, (array) $data, true);
         foreach ($data->roles as $role) {
             $role = (array) $role;
             $role['guild_id'] = $guildPart->id;
-            $rolePart = $this->factory->create(Role::class, $role, true);
+            $rolePart = $this->factory->create(Role::class, (array) $role, true);
 
             $guildPart->roles->offsetSet($rolePart->id, $rolePart);
         }
@@ -46,27 +46,25 @@ class GuildCreate extends Event
         foreach ($data->channels as $channel) {
             $channel = (array) $channel;
             $channel['guild_id'] = $data->id;
-            $channelPart = $this->factory->create(Channel::class, $channel, true);
+            $channelPart = $this->factory->create(Channel::class, (array) $channel, true);
 
             $guildPart->channels->offsetSet($channelPart->id, $channelPart);
         }
 
-        if ($this->discord->options['loadAllMembers']) {
-            foreach ($data->members as $member) {
-                $member = (array) $member;
-                $member['guild_id'] = $data->id;
-                $memberPart = $this->factory->create(Member::class, $member, true);
-                $userPart = $this->factory->create(User::class, $member['user'], true);
+        foreach ($data->members as $member) {
+            $member = (array) $member;
+            $member['guild_id'] = $data->id;
+            $memberPart = $this->factory->create(Member::class, (array) $member, true);
+            $userPart = $this->factory->create(User::class, (array) $member['user'], true);
 
-                $this->discord->users->offsetSet($userPart->id, $userPart);
-                $guildPart->members->offsetSet($memberPart->id, $memberPart);
-            }
+            $this->discord->users->offsetSet($userPart->id, $userPart);
+            $guildPart->members->offsetSet($memberPart->id, $memberPart);
+        }
 
-            foreach ($data->presences as $presence) {
-                if ($member = $guildPart->members->offsetGet($presence->user->id)) {
-                    $member->fill($presence);
-                    $guildPart->members->offsetSet($member->id, $member);
-                }
+        foreach ($data->presences as $presence) {
+            if ($member = $guildPart->members->offsetGet($presence->user->id)) {
+                $member->fill((array) $presence);
+                $guildPart->members->offsetSet($member->id, $member);
             }
         }
 

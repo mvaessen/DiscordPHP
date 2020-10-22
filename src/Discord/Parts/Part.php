@@ -27,7 +27,7 @@ use Serializable;
 abstract class Part implements ArrayAccess, Serializable, JsonSerializable
 {
     /**
-     * THe HTTP client.
+     * The HTTP client.
      *
      * @var Http Client.
      */
@@ -48,6 +48,14 @@ abstract class Part implements ArrayAccess, Serializable, JsonSerializable
     protected $discord;
 
     /**
+     * Custom script data.
+     * Used for storing custom information, used by end products.
+     *
+     * @var mixed
+     */
+    public $scriptData;
+
+    /**
      * The parts fillable attributes.
      *
      * @var array The array of attributes that can be mass-assigned.
@@ -60,13 +68,6 @@ abstract class Part implements ArrayAccess, Serializable, JsonSerializable
      * @var array The parts attributes and content.
      */
     protected $attributes = [];
-
-    /**
-     * The parts attributes cache.
-     *
-     * @var array Attributes which are cached such as parts that are retrieved over REST.
-     */
-    protected $attributes_cache = [];
 
     /**
      * Attributes that are hidden from debug info.
@@ -111,20 +112,6 @@ abstract class Part implements ArrayAccess, Serializable, JsonSerializable
     protected $fillAfterSave = true;
 
     /**
-     * The promise resolve function.
-     *
-     * @var \Closure Resolve function.
-     */
-    public $resolve;
-
-    /**
-     * The promise reject function.
-     *
-     * @var \Closure Reject function.
-     */
-    public $reject;
-
-    /**
      * Create a new part instance.
      *
      * @param Factory $factory    The factory.
@@ -138,7 +125,7 @@ abstract class Part implements ArrayAccess, Serializable, JsonSerializable
         Discord $discord,
         Http $http,
         array $attributes = [],
-        $created = false
+        bool $created = false
     ) {
         $this->factory = $factory;
         $this->discord = $discord;
@@ -147,21 +134,14 @@ abstract class Part implements ArrayAccess, Serializable, JsonSerializable
         $this->created = $created;
         $this->fill($attributes);
 
-        if (is_callable([$this, 'afterConstruct'])) {
-            $this->afterConstruct();
-        }
+        $this->afterConstruct();
+    }
 
-        $this->resolve = function ($response, $deferred) {
-            if (is_null($response)) {
-                $response = true;
-            }
-
-            $deferred->resolve(true);
-        };
-
-        $this->reject = function ($e, $deferred) {
-            $deferred->reject($e);
-        };
+    /**
+     * Called after the part has been constructed.
+     */
+    protected function afterConstruct(): void
+    {
     }
 
     /**
@@ -169,7 +149,7 @@ abstract class Part implements ArrayAccess, Serializable, JsonSerializable
      *
      * @param array $attributes An array of attributes to build the part.
      */
-    public function fill($attributes)
+    public function fill(array $attributes): void
     {
         foreach ($attributes as $key => $value) {
             if (in_array($key, $this->fillable)) {
@@ -179,26 +159,14 @@ abstract class Part implements ArrayAccess, Serializable, JsonSerializable
     }
 
     /**
-     * Clears the attribute cache.
-     *
-     * @return bool Whether the attempt to clear the cache succeeded or failed.
-     */
-    public function clearCache()
-    {
-        $this->attributes_cache = [];
-
-        return true;
-    }
-
-    /**
      * Checks if there is a mutator present.
      *
      * @param string $key  The attribute name to check.
      * @param string $type Either get or set.
      *
-     * @return mixed Either a string if it is callable or false.
+     * @return string|false Either a string if it is callable or false.
      */
-    public function checkForMutator($key, $type)
+    private function checkForMutator(string $key, string $type)
     {
         $str = $type.Str::studly($key).'Attribute';
 
@@ -214,12 +182,13 @@ abstract class Part implements ArrayAccess, Serializable, JsonSerializable
      *
      * @param string $string A string with placeholders.
      *
-     * @return string A string with placeholders replaced.
+     * @return string     A string with placeholders replaced.
+     * @throws \Exception
      */
-    public function replaceWithVariables($string)
+    public function replaceWithVariables(string $string): string
     {
         $matches = null;
-        $matcher = preg_match_all($this->regex, $string, $matches);
+        preg_match_all($this->regex, $string, $matches);
 
         $original = $matches[0];
         $vars = $matches[1];
@@ -234,42 +203,14 @@ abstract class Part implements ArrayAccess, Serializable, JsonSerializable
     }
 
     /**
-     * Replaces variables in one of the URIs.
-     *
-     * @param string $key    A key from URIs.
-     * @param array  $params Parameters to replace placeholders with.
-     *
-     * @return string A string with placeholders replaced.
-     *
-     * @see self::$uris The URIs that can be replaced.
-     */
-    public function uriReplace($key, $params)
-    {
-        $string = $this->uris[$key];
-
-        $matches = null;
-        $matcher = preg_match_all($this->regex, $string, $matches);
-
-        $original = $matches[0];
-        $vars = $matches[1];
-
-        foreach ($vars as $key => $variable) {
-            if ($attribute = $params[$variable]) {
-                $string = str_replace($original[$key], $attribute, $string);
-            }
-        }
-
-        return $string;
-    }
-
-    /**
      * Gets an attribute on the part.
      *
      * @param string $key The key to the attribute.
      *
-     * @return mixed Either the attribute if it exists or void.
+     * @return mixed      Either the attribute if it exists or void.
+     * @throws \Exception
      */
-    public function getAttribute($key)
+    private function getAttribute(string $key)
     {
         if (isset($this->repositories[$key])) {
             if (! isset($this->repositories_cache[$key])) {
@@ -280,9 +221,7 @@ abstract class Part implements ArrayAccess, Serializable, JsonSerializable
         }
 
         if ($str = $this->checkForMutator($key, 'get')) {
-            $result = $this->{$str}();
-
-            return $result;
+            return $this->{$str}();
         }
 
         if (! isset($this->attributes[$key])) {
@@ -298,7 +237,7 @@ abstract class Part implements ArrayAccess, Serializable, JsonSerializable
      * @param string $key   The key to the attribute.
      * @param mixed  $value The value of the attribute.
      */
-    public function setAttribute($key, $value)
+    private function setAttribute(string $key, $value): void
     {
         if ($str = $this->checkForMutator($key, 'set')) {
             $this->{$str}($value);
@@ -312,35 +251,13 @@ abstract class Part implements ArrayAccess, Serializable, JsonSerializable
     }
 
     /**
-     * Sets a cache attribute on the part.
-     *
-     * @param string $key   The cache key.
-     * @param mixed  $value The cache value.
-     */
-    public function setCache($key, $value)
-    {
-        $this->attributes_cache[$key] = $value;
-    }
-
-    /**
-     * Checks if the cache has a specific key.
-     *
-     * @param string $key The key to check for.
-     *
-     * @return bool Whether the cache has the key.
-     */
-    public function cacheHas($key)
-    {
-        return isset($this->attributes_cache[$key]);
-    }
-
-    /**
      * Gets an attribute via key. Used for ArrayAccess.
      *
      * @param string $key The attribute key.
      *
      * @return mixed
      *
+     * @throws \Exception
      * @see self::getAttribute() This function forwards onto getAttribute.
      */
     public function offsetGet($key)
@@ -389,7 +306,7 @@ abstract class Part implements ArrayAccess, Serializable, JsonSerializable
     /**
      * Serializes the data. Used for Serializable.
      *
-     * @return mixed A string of serialized data.
+     * @return string A string of serialized data.
      */
     public function serialize()
     {
@@ -399,9 +316,7 @@ abstract class Part implements ArrayAccess, Serializable, JsonSerializable
     /**
      * Unserializes some data and stores it. Used for Serializable.
      *
-     * @param mixed $data Some serialized data.
-     *
-     * @return mixed Unserialized data.
+     * @param string $data Some serialized data.
      *
      * @see self::setAttribute() The unserialized data is stored with setAttribute.
      */
@@ -420,6 +335,7 @@ abstract class Part implements ArrayAccess, Serializable, JsonSerializable
      *
      * @return array An array of public attributes.
      *
+     * @throws \Exception
      * @see self::getPublicAttributes() This function forwards onto getPublicAttributes.
      */
     public function jsonSerialize()
@@ -430,9 +346,10 @@ abstract class Part implements ArrayAccess, Serializable, JsonSerializable
     /**
      * Returns an array of public attributes.
      *
-     * @return array An array of public attributes.
+     * @return array      An array of public attributes.
+     * @throws \Exception
      */
-    public function getPublicAttributes()
+    public function getPublicAttributes(): array
     {
         $data = [];
 
@@ -458,7 +375,7 @@ abstract class Part implements ArrayAccess, Serializable, JsonSerializable
      *
      * @return array Raw attributes.
      */
-    public function getRawAttributes()
+    public function getRawAttributes(): array
     {
         return $this->attributes;
     }
@@ -468,9 +385,29 @@ abstract class Part implements ArrayAccess, Serializable, JsonSerializable
      *
      * @return array Attributes.
      */
-    public function getRepositoryAttributes()
+    public function getRepositoryAttributes(): array
     {
         return $this->attributes;
+    }
+
+    /**
+     * Returns the attributes needed to create.
+     *
+     * @return array
+     */
+    public function getCreatableAttributes(): array
+    {
+        return [];
+    }
+
+    /**
+     * Returns the updatable attributes.
+     *
+     * @return array
+     */
+    public function getUpdatableAttributes(): array
+    {
+        return [];
     }
 
     /**
@@ -478,6 +415,7 @@ abstract class Part implements ArrayAccess, Serializable, JsonSerializable
      *
      * @return string A JSON string of attributes.
      *
+     * @throws \Exception
      * @see self::getPublicAttributes() This function encodes getPublicAttributes into JSON.
      */
     public function __toString()
@@ -490,9 +428,10 @@ abstract class Part implements ArrayAccess, Serializable, JsonSerializable
      *
      * @return array An array of public attributes.
      *
+     * @throws \Exception
      * @see self::getPublicAttributes() This function forwards onto getPublicAttributes.
      */
-    public function __debugInfo()
+    public function __debugInfo(): array
     {
         return $this->getPublicAttributes();
     }
@@ -504,9 +443,10 @@ abstract class Part implements ArrayAccess, Serializable, JsonSerializable
      *
      * @return mixed The value of the attribute.
      *
+     * @throws \Exception
      * @see self::getAttribute() This function forwards onto getAttribute.
      */
-    public function __get($key)
+    public function __get(string $key)
     {
         return $this->getAttribute($key);
     }
@@ -517,10 +457,9 @@ abstract class Part implements ArrayAccess, Serializable, JsonSerializable
      * @param string $key   The attributes key.
      * @param mixed  $value The attributes value.
      *
-     *
      * @see self::setAttribute() This function forwards onto setAttribute.
      */
-    public function __set($key, $value)
+    public function __set(string $key, $value)
     {
         $this->setAttribute($key, $value);
     }

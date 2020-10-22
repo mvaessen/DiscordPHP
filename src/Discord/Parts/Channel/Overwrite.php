@@ -20,57 +20,46 @@ use Discord\Parts\Permissions\ChannelPermission;
  * @property string                                       $id          The unique identifier of the user/role that the overwrite applies to.
  * @property string                                       $channel_id  The unique identifier of the channel that the overwrite belongs to.
  * @property string                                       $type        The type of part that the overwrite applies to. Can be 'role' or 'user'.
- * @property int                                          $allow       The bitwise integer for allow permissions.
- * @property int                                          $deny        The bitwise integer for deny permissions.
- * @property \Discord\Parts\Permissions\ChannelPermission $permissions The overwrite permissions.
+ * @property ChannelPermission                            $allow       The allow permissions.
+ * @property ChannelPermission                            $deny        The deny permissions.
  */
 class Overwrite extends Part
 {
+    const TYPE_MEMBER = 'member';
+    const TYPE_ROLE = 'role';
+
     /**
      * {@inheritdoc}
      */
     protected $fillable = ['id', 'channel_id', 'type', 'allow', 'deny', 'permissions'];
 
     /**
-     * {@inheritdoc}
-     */
-    public function afterConstruct()
-    {
-        $this->permissions = $this->factory->create(ChannelPermission::class);
-        $this->permissions->decodeBitwise($this->allow, $this->deny);
-    }
-
-    /**
-     * Sets the permissions attribute.
+     * Sets the allow attribute of the role.
      *
-     * @param ChannelPermission $permissions Permission object.
+     * @param  ChannelPermission|int $allow
+     * @throws \Exception
      */
-    public function setPermissionsAttribute($permissions)
+    protected function setAllowAttribute($allow): void
     {
-        if (! ($permissions instanceof ChannelPermission)) {
-            return;
+        if (! ($allow instanceof ChannelPermission)) {
+            $allow = $this->factory->create(ChannelPermission::class, ['bitwise' => $allow], true);
         }
 
-        list($allow, $deny) = $permissions->bitwise;
-        $this->allow = $allow;
-        $this->deny = $deny;
-
-        $this->attributes['permissions'] = $permissions;
+        $this->attributes['allow'] = $allow;
     }
 
     /**
-     * {@inheritdoc}
+     * Sets the deny attribute of the role.
+     *
+     * @param  ChannelPermission|int $deny
+     * @throws \Exception
      */
-    public function getCreatableAttributes()
+    protected function setDenyAttribute($deny): void
     {
-        return [];
-    }
+        if (! ($deny instanceof ChannelPermission)) {
+            $deny = $this->factory->create(ChannelPermission::class, ['bitwise' => $deny], true);
+        }
 
-    /**
-     * {@inheritdoc}
-     */
-    public function getUpdatableAttributes()
-    {
-        return [];
+        $this->attributes['deny'] = $deny;
     }
 }

@@ -20,17 +20,17 @@ class ChannelCreate extends Event
     /**
      * {@inheritdoc}
      */
-    public function handle(Deferred $deferred, $data)
+    public function handle(Deferred &$deferred, $data): void
     {
-        $channel = $this->factory->create(Channel::class, $data, true);
+        $channel = $this->factory->create(Channel::class, (array) $data, true);
 
-        if (array_search($channel->type, [Channel::TYPE_TEXT, Channel::TYPE_VOICE]) === false) {
+        if (isset($data->attributes['recipients'])) {
             $this->discord->private_channels->push($channel);
         } else {
-            $guild = $this->discord->guilds->get('id', $channel->guild_id);
-            $guild->channels->push($channel);
-
-            $this->discord->guilds->push($guild);
+            if ($guild = $this->discord->guilds->get('id', $channel->guild_id)) {
+                $guild->channels->push($channel);
+                $this->discord->guilds->push($guild);
+            }
         }
 
         $deferred->resolve($channel);

@@ -13,41 +13,27 @@ namespace Discord\Http;
 
 use Carbon\Carbon;
 use Discord\Discord;
-use GuzzleHttp\Client as GuzzleClient;
-use GuzzleHttp\HandlerStack;
-use GuzzleHttp\Psr7\Request;
+use Psr\Http\Message\ResponseInterface;
 use React\EventLoop\LoopInterface;
+use React\Http\Browser;
+use React\Http\Message\ResponseException;
 use React\Promise\Deferred;
-use WyriHaximus\React\GuzzlePsr7\HttpClientAdapter;
+use React\Promise\PromiseInterface;
+use React\Socket\ConnectorInterface;
 
 /**
- * The Guzzle PHP library driver for the HTTP client.
+ * react/http driver.
  *
- * @author David Cole <david@team-reflex.com>
+ * @author David Cole <david.cole1340@gmail.com>
  */
-class Guzzle extends GuzzleClient implements HttpDriver
+class ReactDriver extends Browser implements HttpDriver
 {
     /**
-     * Whether we are operating as async.
+     * The react event loop.
      *
-     * @var bool Async.
-     */
-    protected $async = false;
-    
-    /**
-     * The ReactPHP event loop.
-     *
-     * @var LoopInterface Event loop.
+     * @var LoopInterface
      */
     protected $loop;
-
-    /**
-     * The GuzzleHTTP -> ReactPHP connector.
-     *
-     * @var HttpClientAdapter The connector.
-     */
-    protected $adapter;
-
     /**
      * Whether the HTTP client has been rate limited.
      *
@@ -63,46 +49,30 @@ class Guzzle extends GuzzleClient implements HttpDriver
     protected $rateLimits = [];
 
     /**
-     * Constructs a Guzzle driver.
-     *
-     * @param LoopInterface|null $loop The ReactPHP event loop.
+     * {@inheritdoc}
      */
-    public function __construct(LoopInterface $loop)
+    public function __construct(LoopInterface $loop, ConnectorInterface $connector = null)
     {
-        $options = ['http_errors' => false, 'allow_redirects' => true, 'base_uri' => Http::BASE_URL.'/v'.Discord::HTTP_API_VERSION];
-
-        $this->async = true;
         $this->loop = $loop;
-        $this->adapter = new HttpClientAdapter($this->loop);
-        $options['handler'] = HandlerStack::create($this->adapter);
-
-        return parent::__construct($options);
+        parent::__construct($loop, $connector);
     }
 
     /**
      * {@inheritdoc}
      */
-    public function runRequest($method, $url, $headers, $body, array $options = [])
+    public function runRequest(string $method, string $url, array $headers, ?string $body, array $options = []): PromiseInterface
     {
         $deferred = new Deferred();
-
-        $request = ($method instanceof Request) ? $method : new Request(
-            $method,
-            $url,
-            $headers,
-            $body,
-            '1.0'
-        );
         $count = 0;
 
-        $sendRequest = function () use (&$sendRequest, &$count, $request, $deferred, $options) {
-            $promise = $this->sendAsync($request, $options);
-
-            $promise->then(function ($response) use (&$count, &$sendRequest, $deferred) {
-                if ($response->getStatusCode() !== 429 && $response->getHeader('X-RateLimit-Remaining') == 0) {
+        $sendRequest = function () use ($method, $url, $headers, $body, $options, $deferred, &$sendRequest, &$count) {
+            $handleResponse = function (ResponseInterface $response) use ($deferred, &$sendRequest, &$count) {
+                $xRateRemaining = $response->getHeader('X-RateLimit-Remaining');
+                if ($response->getStatusCode() !== 429 && sizeof($xRateRemaining) !== 0 && (int) $xRateRemaining[0] == 0) {
                     $this->rateLimited = true;
 
-                    $limitEnd = Carbon::createFromTimestamp($response->getHeader('X-RateLimit-Reset'));
+                    $limitEnd = Carbon::createFromTimestamp((int) $response->getHeader('X-RateLimit-Reset')[0]);
+
                     $this->loop->addTimer(Carbon::now()->diffInSeconds($limitEnd), function () {
                         foreach ($this->rateLimits as $i => $d) {
                             $d->resolve();
@@ -111,8 +81,6 @@ class Guzzle extends GuzzleClient implements HttpDriver
 
                         $this->rateLimited = false;
                     });
-
-                    $deferred->notify('The next request will hit a rate limit.');
                 }
 
                 // Discord Rate-Limiting
@@ -133,8 +101,6 @@ class Guzzle extends GuzzleClient implements HttpDriver
 
                         $this->rateLimited = false;
                     });
-
-                    $deferred->notify('You have been rate limited.');
                 }
                 // Bad Gateway
                 // Cloudflare SSL Handshake Error
@@ -158,34 +124,27 @@ class Guzzle extends GuzzleClient implements HttpDriver
                 else {
                     $deferred->resolve($response);
                 }
-            }, function ($e) use ($deferred) {
-                $deferred->reject($e);
+            };
+
+            $this->{$method}($this->makeUrl($url), $headers, $body)->then($handleResponse)->otherwise(function (ResponseException $e) use ($handleResponse) {
+                $handleResponse($e->getResponse());
             });
         };
 
-        if ($this->rateLimited) {
-            $deferred = new Deferred();
-            $deferred->promise()->then($sendRequest);
-            $this->rateLimits[] = $deferred;
-        } else {
-            $sendRequest();
-        }
+        $sendRequest();
 
         return $deferred->promise();
     }
 
     /**
-     * {@inheritdoc}
+     * Makes a FQDN from a given endpoint.
+     *
+     * @param string $endpoint
+     *
+     * @return string
      */
-    public function blocking($method, $url, $headers, $body)
+    private function makeUrl(string $endpoint): string
     {
-        $request = new Request(
-            $method,
-            Http::BASE_URL.'/'.$url,
-            $headers,
-            $body
-        );
-
-        return $this->send($request);
+        return Http::BASE_URL.'/v'.Discord::HTTP_API_VERSION.'/'.$endpoint;
     }
 }

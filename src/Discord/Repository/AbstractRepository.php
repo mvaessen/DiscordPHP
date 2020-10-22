@@ -19,13 +19,16 @@ use Discord\Helpers\Collection;
 use Discord\Http\Http;
 use Discord\Parts\Part;
 use React\Promise\Deferred;
+use React\Promise\PromiseInterface;
+use function React\Promise\reject as Reject;
+use function React\Promise\resolve as Resolve;
 
 /**
  * Repositories provide a way to store and update parts on the Discord server.
  *
- * @author Aaron Scherer <aequasi@gmail.com>
+ * @author Aaron Scherer <aequasi@gmail.com>, David Cole <david.cole1340@gmail.com>
  */
-abstract class AbstractRepository implements RepositoryInterface, ArrayAccess, Countable, IteratorAggregate
+abstract class AbstractRepository extends Collection
 {
     /**
      * The discriminator.
@@ -49,25 +52,11 @@ abstract class AbstractRepository implements RepositoryInterface, ArrayAccess, C
     protected $factory;
 
     /**
-     * The collection of items.
-     *
-     * @var Collection Items.
-     */
-    protected $collection;
-
-    /**
      * Endpoints for interacting with the Discord servers.
      *
      * @var array Endpoints.
      */
     protected $endpoints = [];
-
-    /**
-     * The part that the repository serves.
-     *
-     * @var string The part that the repository serves.
-     */
-    protected $part;
 
     /**
      * Variables that are related to the repository.
@@ -83,23 +72,25 @@ abstract class AbstractRepository implements RepositoryInterface, ArrayAccess, C
      * @param Factory $factory The parts factory.
      * @param array   $vars    An array of variables used for the endpoint.
      */
-    public function __construct(Http $http, Factory $factory, $vars = [])
+    public function __construct(Http $http, Factory $factory, array $vars = [])
     {
         $this->http = $http;
         $this->factory = $factory;
-        $this->collection = new Collection([], $this->discrim, $this->part);
         $this->vars = $vars;
+
+        parent::__construct();
     }
 
     /**
      * Freshens the repository collection.
      *
-     * @return \React\Promise\Promise
+     * @return PromiseInterface
+     * @throws \Exception
      */
-    public function freshen()
+    public function freshen(): PromiseInterface
     {
         if (! isset($this->endpoints['all'])) {
-            return \React\Promise\reject(new \Exception('You cannot freshen this repository.'));
+            return Reject(new \Exception('You cannot freshen this repository.'));
         }
 
         $deferred = new Deferred();
@@ -113,10 +104,10 @@ abstract class AbstractRepository implements RepositoryInterface, ArrayAccess, C
             false
         )->then(function ($response) use ($deferred) {
             $this->fill([]);
-            
+
             foreach ($response as $value) {
                 $value = array_merge($this->vars, (array) $value);
-                $part = $this->factory->create($this->part, $value, true);
+                $part = $this->factory->create($this->class, $value, true);
 
                 $this->push($part);
             }
@@ -130,19 +121,29 @@ abstract class AbstractRepository implements RepositoryInterface, ArrayAccess, C
     }
 
     /**
-     * {@inheritdoc}
+     * Builds a new, empty part.
+     *
+     * @param array $attributes The attributes for the new part.
+     *
+     * @return Part       The new part.
+     * @throws \Exception
      */
-    public function create(array $attributes = [])
+    public function create(array $attributes = []): Part
     {
         $attributes = array_merge($attributes, $this->vars);
 
-        return $this->factory->create($this->part, $attributes);
+        return $this->factory->create($this->class, $attributes);
     }
 
     /**
-     * {@inheritdoc}
+     * Attempts to save a part to the Discord servers.
+     *
+     * @param Part $part The part to save.
+     *
+     * @return PromiseInterface
+     * @throws \Exception
      */
-    public function save(Part &$part)
+    public function save(Part $part): PromiseInterface
     {
         if ($part->created) {
             $method = 'patch';
@@ -150,7 +151,7 @@ abstract class AbstractRepository implements RepositoryInterface, ArrayAccess, C
             $attributes = $part->getUpdatableAttributes();
 
             if (! isset($this->endpoints['update'])) {
-                return \React\Promise\reject(new \Exception('You cannot update this part.'));
+                return Reject(new \Exception('You cannot update this part.'));
             }
         } else {
             $method = 'post';
@@ -158,7 +159,7 @@ abstract class AbstractRepository implements RepositoryInterface, ArrayAccess, C
             $attributes = $part->getCreatableAttributes();
 
             if (! isset($this->endpoints['create'])) {
-                return \React\Promise\reject(new \Exception('You cannot create this part.'));
+                return Reject(new \Exception('You cannot create this part.'));
             }
         }
 
@@ -169,16 +170,10 @@ abstract class AbstractRepository implements RepositoryInterface, ArrayAccess, C
             $attributes
         )->then(function ($response) use ($deferred, &$part, $method) {
             $part->fill((array) $response);
-
-            if ($index = $this->getIndex('id', $part->id)) {
-                $this->collection[$index] = $part;
-            } else {
-                $this->collection->push($part);
-            }
-
             $part->created = true;
             $part->deleted = false;
 
+            $this->push($part);
             $deferred->resolve($part);
         }, function ($e) use ($deferred) {
             $deferred->reject($e);
@@ -188,16 +183,25 @@ abstract class AbstractRepository implements RepositoryInterface, ArrayAccess, C
     }
 
     /**
-     * {@inheritdoc}
+     * Attempts to delete a part on the Discord servers.
+     *
+     * @param Part|snowflake $part The part to delete.
+     *
+     * @return PromiseInterface
+     * @throws \Exception
      */
-    public function delete(Part &$part)
+    public function delete($part): PromiseInterface
     {
+        if (! ($part instanceof Part)) {
+            $part = $this->factory->part($this->class, ['id' => $part], true);
+        }
+
         if (! $part->created) {
-            return \React\Promise\reject(new \Exception('You cannot delete a non-existant part.'));
+            return Reject(new \Exception('You cannot delete a non-existant part.'));
         }
 
         if (! isset($this->endpoints['delete'])) {
-            return \React\Promise\reject(new \Exception('You cannot delete this part.'));
+            return Reject(new \Exception('You cannot delete this part.'));
         }
 
         $deferred = new Deferred();
@@ -220,16 +224,21 @@ abstract class AbstractRepository implements RepositoryInterface, ArrayAccess, C
     }
 
     /**
-     * {@inheritdoc}
+     * Returns a part with fresh values.
+     *
+     * @param Part $part The part to get fresh values.
+     *
+     * @return PromiseInterface
+     * @throws \Exception
      */
-    public function fresh(Part &$part)
+    public function fresh(Part $part): PromiseInterface
     {
         if (! $part->created) {
-            return \React\Promise\reject(new \Exception('You cannot get a non-existant part.'));
+            return Reject(new \Exception('You cannot get a non-existant part.'));
         }
 
         if (! isset($this->endpoints['get'])) {
-            return \React\Promise\reject(new \Exception('You cannot get this part.'));
+            return Reject(new \Exception('You cannot get this part.'));
         }
 
         $deferred = new Deferred();
@@ -241,7 +250,7 @@ abstract class AbstractRepository implements RepositoryInterface, ArrayAccess, C
                 )
             )
         )->then(function ($response) use ($deferred, &$part) {
-            $part->fill($response);
+            $part->fill((array) $response);
 
             $deferred->resolve($part);
         }, function ($e) use ($deferred) {
@@ -252,16 +261,21 @@ abstract class AbstractRepository implements RepositoryInterface, ArrayAccess, C
     }
 
     /**
-     * {@inheritdoc}
+     * Force gets a part from the Discord servers.
+     *
+     * @param string $id The ID to search for.
+     *
+     * @return PromiseInterface
+     * @throws \Exception
      */
-    public function fetch($id)
+    public function fetch(string $id): PromiseInterface
     {
         if ($part = $this->get('id', $id)) {
-            return \React\Promise\resolve($part);
+            return Resolve($part);
         }
 
         if (! isset($this->endpoints['get'])) {
-            return \React\Promise\reject(new \Exception('You cannot get this part.'));
+            return Reject(new \Exception('You cannot get this part.'));
         }
 
         $deferred = new Deferred();
@@ -271,7 +285,7 @@ abstract class AbstractRepository implements RepositoryInterface, ArrayAccess, C
                 str_replace(':id', $id, $this->endpoints['get'])
             )
         )->then(function ($response) use ($deferred) {
-            $part = $this->factory->create($this->part, $response, true);
+            $part = $this->factory->create($this->class, (array) $response, true);
 
             $deferred->resolve($part);
         }, function ($e) use ($deferred) {
@@ -288,7 +302,7 @@ abstract class AbstractRepository implements RepositoryInterface, ArrayAccess, C
      *
      * @return string A string with placeholders replaced.
      */
-    protected function replaceWithVariables($string)
+    protected function replaceWithVariables(string $string): string
     {
         if (preg_match_all('/:([a-z_]+)/', $string, $matches)) {
             list(
@@ -307,100 +321,12 @@ abstract class AbstractRepository implements RepositoryInterface, ArrayAccess, C
     }
 
     /**
-     * Returns how many items are in the repository.
-     *
-     * @return int Count.
-     */
-    public function count()
-    {
-        return $this->collection->count();
-    }
-
-    /**
-     * Get an iterator for the items.
-     *
-     * @return \ArrayIterator
-     */
-    public function getIterator()
-    {
-        return $this->collection->getIterator();
-    }
-
-    /**
-     * Determine if an item exists at an offset.
-     *
-     * @param mixed $key
-     *
-     * @return bool
-     */
-    public function offsetExists($key)
-    {
-        return $this->collection->offsetExists($key);
-    }
-
-    /**
-     * Get an item at a given offset.
-     *
-     * @param mixed $key
-     *
-     * @return mixed
-     */
-    public function offsetGet($key)
-    {
-        return $this->collection->offsetGet($key);
-    }
-
-    /**
-     * Set the item at a given offset.
-     *
-     * @param mixed $key
-     * @param mixed $value
-     */
-    public function offsetSet($key, $value)
-    {
-        $this->collection->offsetSet($key, $value);
-    }
-
-    /**
-     * Unset the item at a given offset.
-     *
-     * @param string $key
-     */
-    public function offsetUnset($key)
-    {
-        $this->collection->offsetUnset($key);
-    }
-
-    /**
-     * Convert the object into something JSON serializable.
-     *
-     * @return array
-     */
-    public function jsonSerialize()
-    {
-        return $this->collection->jsonSerialize();
-    }
-
-    /**
      * Handles debug calls from var_dump and similar functions.
      *
      * @return array An array of attributes.
      */
-    public function __debugInfo()
+    public function __debugInfo(): array
     {
         return $this->jsonSerialize();
-    }
-
-    /**
-     * Handles dynamic calls to the repository.
-     *
-     * @param string $function The function called.
-     * @param array  $params   Array of parameters.
-     *
-     * @return mixed
-     */
-    public function __call($function, array $params)
-    {
-        return call_user_func_array([$this->collection, $function], $params);
     }
 }

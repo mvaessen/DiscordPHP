@@ -19,13 +19,22 @@ class MessageDelete extends Event
     /**
      * {@inheritdoc}
      */
-    public function handle(Deferred $deferred, $data)
+    public function handle(Deferred &$deferred, $data): void
     {
-        if ($guild = $this->discord->guilds->get('id', $data->guild_id)) {
-            if ($channel = $guild->channels->get('id', $data->channel_id)) {
+        $message = null;
+
+        if (! isset($data->guild_id)) {
+            if ($channel = $this->discord->private_channels->get('id', $data->channel_id)) {
                 $message = $channel->messages->pull($data->id);
-                $guild->channels->push($channel);
-                $this->discord->guilds->push($guild);
+                $this->discord->private_channels->push($channel);
+            }
+        } else {
+            if ($guild = $this->discord->guilds->get('id', $data->guild_id)) {
+                if ($channel = $guild->channels->get('id', $data->channel_id)) {
+                    $message = $channel->messages->pull($data->id);
+                    $guild->channels->push($channel);
+                    $this->discord->guilds->push($guild);
+                }
             }
         }
 

@@ -19,11 +19,11 @@ use Discord\Parts\Part;
  *
  * @property string                     $id             The identifier for the emoji.
  * @property string                     $name           The name of the emoji.
- * @property \Discord\Parts\Guild\Guild $guild          The guild that owns the emoji.
+ * @property Guild                      $guild          The guild that owns the emoji.
  * @property string                     $guild_id       The identifier of the guild that owns the emoji.
  * @property bool                       $managed        Whether this emoji is managed by a role.
  * @property bool                       $require_colons Whether the emoji requires colons to be triggered.
- * @property Collection[Role]           $roles          The roles that are allowed to use the emoji.
+ * @property Collection|Role[]          $roles          The roles that are allowed to use the emoji.
  * @property bool                       $animated       Whether the emoji is animated.
  */
 class Emoji extends Part
@@ -38,7 +38,7 @@ class Emoji extends Part
      *
      * @return Guild The guild the emoji belongs to.
      */
-    public function getGuildAttribute()
+    protected function getGuildAttribute(): ?Guild
     {
         return $this->discord->guilds->get('id', $this->guild_id);
     }
@@ -48,12 +48,12 @@ class Emoji extends Part
      *
      * @return Collection A collection of roles for the emoji.
      */
-    public function getRolesAttribute()
+    protected function getRolesAttribute(): Collection
     {
         if (! $this->guild) {
-            return [];
+            return new Collection();
         }
-        
+
         return $this->guild->roles->filter(function ($role) {
             return array_search($role->id, $this->attributes['roles']) !== false;
         });
@@ -64,7 +64,7 @@ class Emoji extends Part
      *
      * @return string
      */
-    public function toReactionString()
+    public function toReactionString(): string
     {
         if ($this->id) {
             return ":{$this->name}:{$this->id}";
@@ -81,9 +81,9 @@ class Emoji extends Part
     public function __toString()
     {
         if ($this->id) {
-            return "<a:{$this->name}:{$this->id}>";
+            return '<'.($this->animated ? 'a' : '').$this->toReactionString().'>';
         }
-        
+
         return $this->name;
     }
 }

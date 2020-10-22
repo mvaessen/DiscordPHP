@@ -14,12 +14,16 @@ namespace Discord\Parts\User;
 use Carbon\Carbon;
 use Discord\Helpers\Collection;
 use Discord\Parts\Channel\Channel;
+use Discord\Parts\Channel\Overwrite;
 use Discord\Parts\Guild\Ban;
 use Discord\Parts\Guild\Guild;
 use Discord\Parts\Guild\Role;
 use Discord\Parts\Part;
+use Discord\Parts\Permissions\RolePermission;
 use Discord\Parts\WebSockets\PresenceUpdate;
 use React\Promise\Deferred;
+use React\Promise\PromiseInterface;
+use function React\Partial\bind as Bind;
 
 /**
  * A member is a relationship between a user and a guild. It contains user-to-guild specific data like roles.
@@ -27,18 +31,18 @@ use React\Promise\Deferred;
  * @property string                       $id            The unique identifier of the member.
  * @property string                       $username      The username of the member.
  * @property string                       $discriminator The discriminator of the member.
- * @property \Discord\Parts\Guild\User    $user          The user part of the member.
- * @property Collection[Role]             $roles         A collection of Roles that the member has.
+ * @property User                         $user          The user part of the member.
+ * @property Collection|Role[]            $roles         A collection of Roles that the member has.
  * @property bool                         $deaf          Whether the member is deaf.
  * @property bool                         $mute          Whether the member is mute.
  * @property Carbon                       $joined_at     A timestamp of when the member joined the guild.
- * @property \Discord\Parts\Guild\Guild   $guild         The guild that the member belongs to.
+ * @property Guild                        $guild         The guild that the member belongs to.
  * @property string                       $guild_id      The unique identifier of the guild that the member belongs to.
  * @property string                       $status        The status of the member.
- * @property \Discord\Parts\User\Activity $game          The game the member is playing.
+ * @property Activity                     $game          The game the member is playing.
  * @property string|null                  $nick          The nickname of the member.
- * @property \Carbon\Carbon               $premium_since When the user started boosting the server.
- * @property Collection[Activities]       $activities User's current activities.
+ * @property Carbon                       $premium_since When the user started boosting the server.
+ * @property Collection|Activity[]        $activities User's current activities.
  * @property object                       $client_status Current client status
  */
 class Member extends Part
@@ -60,8 +64,9 @@ class Member extends Part
      * @param PresenceUpdate $presence
      *
      * @return PresenceUpdate Old presence.
+     * @throws \Exception
      */
-    public function updateFromPresence(PresenceUpdate $presence)
+    public function updateFromPresence(PresenceUpdate $presence): Part
     {
         $rawPresence = $presence->getRawAttributes();
         $oldPresence = $this->factory->create(PresenceUpdate::class, $this->attributes, true);
@@ -74,11 +79,12 @@ class Member extends Part
     /**
      * Bans the member.
      *
-     * @param int $daysToDeleteMessasges The amount of days to delete messages from.
+     * @param int|null $daysToDeleteMessasges The amount of days to delete messages from.
      *
-     * @return \React\Promise\Promise
+     * @return PromiseInterface
+     * @throws \Exception
      */
-    public function ban($daysToDeleteMessasges = null)
+    public function ban(?int $daysToDeleteMessasges = null): PromiseInterface
     {
         $deferred = new Deferred();
         $content = [];
@@ -98,7 +104,7 @@ class Member extends Part
 
                 $deferred->resolve($ban);
             },
-            \React\Partial\bind_right($this->reject, $deferred)
+            Bind([$deferred, 'reject'])
         );
 
         return $deferred->promise();
@@ -109,9 +115,9 @@ class Member extends Part
      *
      * @param string|null $nick The nickname of the member.
      *
-     * @return \React\Promise\Promise
+     * @return PromiseInterface
      */
-    public function setNickname($nick = null)
+    public function setNickname(?string $nick = null): PromiseInterface
     {
         $deferred = new Deferred();
 
@@ -128,8 +134,8 @@ class Member extends Part
         }
 
         $promise->then(
-            \React\Partial\bind_right($this->resolve, $deferred),
-            \React\Partial\bind_right($this->reject, $deferred)
+            Bind([$deferred, 'resolve']),
+            Bind([$deferred, 'reject'])
         );
 
         return $deferred->promise();
@@ -140,9 +146,9 @@ class Member extends Part
      *
      * @param Channel|int $channel The channel to move the member to.
      *
-     * @return \React\Promise\Promise
+     * @return PromiseInterface
      */
-    public function moveMember($channel)
+    public function moveMember($channel): PromiseInterface
     {
         $deferred = new Deferred();
 
@@ -157,7 +163,7 @@ class Member extends Part
             ]
         )->then(function () use ($deferred) {
             $deferred->resolve();
-        }, \React\Partial\bind_right($this->reject, $deferred));
+        }, Bind([$deferred, 'reject']));
 
         // At the moment we are unable to check if the member
         // was moved successfully.
@@ -170,22 +176,29 @@ class Member extends Part
      *
      * @param Role|int $role The role to add to the member.
      *
-     * @return bool Whether adding the role succeeded.
+     * @return PromiseInterface
      */
-    public function addRole($role)
+    public function addRole($role): PromiseInterface
     {
+        $deferred = new Deferred();
+
         if ($role instanceof Role) {
             $role = $role->id;
         }
 
         // We don't want a double up on roles
         if (false !== array_search($role, (array) $this->attributes['roles'])) {
-            return false;
+            $deferred->reject(new \Exception('User already has role.'));
+        } else {
+            $this->http->put(
+                "guilds/{$this->guild_id}/members/{$this->id}/roles/{$role}"
+            )->then(function () use ($role, $deferred) {
+                $this->attributes['roles'][] = $role;
+                $deferred->resolve();
+            }, Bind([$deferred, 'reject']));
         }
 
-        $this->attributes['roles'][] = $role;
-
-        return true;
+        return $deferred->promise();
     }
 
     /**
@@ -193,29 +206,83 @@ class Member extends Part
      *
      * @param Role|int $role The role to remove from the member.
      *
-     * @return bool Whether removing the role succeeded.
+     * @return PromiseInterface
      */
-    public function removeRole($role)
+    public function removeRole($role): PromiseInterface
     {
+        $deferred = new Deferred();
+
         if ($role instanceof Role) {
             $role = $role->id;
         }
 
         if (false !== ($index = array_search($role, $this->attributes['roles']))) {
-            unset($this->attributes['roles'][$index]);
-
-            return true;
+            $this->http->delete(
+                "guilds/{$this->guild_id}/members/{$this->id}/roles/{$role}"
+            )->then(function () use ($index, $deferred) {
+                unset($this->attributes['roles'][$index]);
+                $deferred->resolve();
+            }, Bind([$deferred, 'reject']));
+        } else {
+            $deferred->reject(new \Exception('User does not have role.'));
         }
 
-        return false;
+        return $deferred->promise();
+    }
+
+    /**
+     * Gets the total permissions of the member.
+     *
+     * Note that Discord permissions are complex and YOU
+     * need to account for the fact that you cannot edit
+     * a role higher than your own.
+     *
+     * @see https://discord.com/developers/docs/topics/permissions
+     *
+     * @param Channel|null $channel
+     *
+     * @return RolePermission
+     */
+    public function getPermissions(?Channel $channel = null): RolePermission
+    {
+        $bitwise = $this->guild->roles->get('id', $this->guild_id)->permissions->bitwise;
+
+        if ($this->guild->owner_id == $this->id) {
+            $bitwise |= 0x8; // Add administrator permission
+        } else {
+            /* @var Role */
+            foreach ($this->roles as $role) {
+                $bitwise |= $role->permissions->bitwise;
+            }
+
+            if ($channel) {
+                /* @var Overwrite */
+                foreach ($channel->overwrites as $overwrite) {
+                    $bitwise |= $overwrite->allow->bitwise;
+                    $bitwise &= ~($overwrite->deny->bitwise);
+                }
+            }
+        }
+
+        /** @var RolePermission */
+        $newPermission = $this->factory->part(RolePermission::class, ['bitwise' => $bitwise]);
+
+        if ($newPermission->administrator) {
+            foreach (RolePermission::getPermissions() as $permission => $_) {
+                $newPermission->{$permission} = true;
+            }
+        }
+
+        return $newPermission;
     }
 
     /**
      * Gets the game attribute.
      *
      * @return Activity
+     * @throws \Exception
      */
-    public function getGameAttribute()
+    protected function getGameAttribute(): Part
     {
         if (! array_key_exists('game', $this->attributes)) {
             $this->attributes['game'] = [];
@@ -227,18 +294,19 @@ class Member extends Part
     /**
      * Gets the activities attribute.
      *
-     * @return array[Activity]
+     * @return Collection|Activity[]
+     * @throws \Exception
      */
-    public function getActivitiesAttribute()
+    protected function getActivitiesAttribute(): Collection
     {
-        $activities = [];
+        $activities = new Collection([], null);
 
         if (! array_key_exists('activities', $this->attributes)) {
             $this->attributes['activities'] = [];
         }
 
         foreach ($this->attributes['activities'] as $activity) {
-            $activities[] = $this->factory->create(Activity::class, (array) $activity, true);
+            $activities->push($this->factory->create(Activity::class, (array) $activity, true));
         }
 
         return $activities;
@@ -247,9 +315,9 @@ class Member extends Part
     /**
      * Returns the id attribute.
      *
-     * @return int The user ID of the member.
+     * @return string The user ID of the member.
      */
-    public function getIdAttribute()
+    protected function getIdAttribute(): string
     {
         return $this->attributes['user']->id;
     }
@@ -259,9 +327,9 @@ class Member extends Part
      *
      * @return string The username of the member.
      */
-    public function getUsernameAttribute()
+    protected function getUsernameAttribute(): string
     {
-        return $this->attributes['user']->username;
+        return $this->user->username;
     }
 
     /**
@@ -269,22 +337,23 @@ class Member extends Part
      *
      * @return string The discriminator of the member.
      */
-    public function getDiscriminatorAttribute()
+    protected function getDiscriminatorAttribute(): string
     {
-        return $this->attributes['user']->discriminator;
+        return $this->user->discriminator;
     }
 
     /**
      * Returns the user attribute.
      *
-     * @return User The user that owns the member.
+     * @return User       The user that owns the member.
+     * @throws \Exception
      */
-    public function getUserAttribute()
+    protected function getUserAttribute(): User
     {
         if ($user = $this->discord->users->get('id', $this->attributes['user']->id)) {
             return $user;
         }
-        
+
         return $this->factory->create(User::class, $this->attributes['user'], true);
     }
 
@@ -293,7 +362,7 @@ class Member extends Part
      *
      * @return Guild The guild.
      */
-    public function getGuildAttribute()
+    protected function getGuildAttribute(): Guild
     {
         return $this->discord->guilds->get('id', $this->guild_id);
     }
@@ -302,8 +371,9 @@ class Member extends Part
      * Returns the roles attribute.
      *
      * @return Collection A collection of roles the member is in.
+     * @throws \Exception
      */
-    public function getRolesAttribute()
+    protected function getRolesAttribute(): Collection
     {
         $roles = new Collection();
 
@@ -315,7 +385,7 @@ class Member extends Part
             }
         } else {
             foreach ($this->attributes['roles'] as $role) {
-                $roles->push($this->factory->create(Role::class, $role, true));
+                $roles->push($this->factory->create(Role::class, (array) $role, true));
             }
         }
 
@@ -325,9 +395,10 @@ class Member extends Part
     /**
      * Returns the joined at attribute.
      *
-     * @return Carbon The timestamp from when the member joined.
+     * @return Carbon     The timestamp from when the member joined.
+     * @throws \Exception
      */
-    public function getJoinedAtAttribute()
+    protected function getJoinedAtAttribute(): Carbon
     {
         return new Carbon($this->attributes['joined_at']);
     }
@@ -335,7 +406,7 @@ class Member extends Part
     /**
      * {@inheritdoc}
      */
-    public function getUpdatableAttributes()
+    public function getUpdatableAttributes(): array
     {
         return [
             'roles' => array_values($this->attributes['roles']),
@@ -345,14 +416,14 @@ class Member extends Part
     /**
      * Returns the premium since attribute.
      *
-     * @return \Carbon\Carbon
+     * @return Carbon|null
      */
-    public function getPremiumSinceAttribute()
+    protected function getPremiumSinceAttribute(): ?Carbon
     {
         if (! isset($this->attributes['premium_since'])) {
-            return false;
+            return null;
         }
-        
+
         return Carbon::parse($this->attributes['premium_since']);
     }
 

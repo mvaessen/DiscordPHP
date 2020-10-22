@@ -11,6 +11,8 @@
 
 namespace Discord\Http;
 
+use React\Promise\PromiseInterface;
+
 /**
  * Interface for HTTP drivers.
  *
@@ -21,25 +23,13 @@ interface HttpDriver
     /**
      * Runs an HTTP request.
      *
-     * @param string $method  The HTTP method to use.
-     * @param string $url     The endpoint that will be queried.
-     * @param array  $headers The headers to send in the request.
-     * @param string $body    The request content.
-     * @param array  $options An array of Guzzle options.
+     * @param string      $method  The HTTP method to use.
+     * @param string      $url     The endpoint that will be queried.
+     * @param array       $headers The headers to send in the request.
+     * @param string|null $body    The request content.
+     * @param array       $options An array of Guzzle options.
      *
-     * @return \React\Promise\Promise
+     * @return PromiseInterface
      */
-    public function runRequest($method, $url, $headers, $body, array $options = []);
-    
-    /**
-     * Runs a blocking HTTP request.
-     *
-     * @param string $method  The HTTP method to use.
-     * @param string $url     The endpoint that will be queried.
-     * @param array  $headers The headers to send in the request.
-     * @param string $body    The request content.
-     *
-     * @return \Psr\Http\Message\ResponseInterface
-     */
-    public function blocking($method, $url, $headers, $body);
+    public function runRequest(string $method, string $url, array $headers, ?string $body, array $options = []): PromiseInterface;
 }
